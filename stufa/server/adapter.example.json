@@ -1,0 +1,34 @@
+{
+  "_commento": "Esempio di adattatore HTTP generico: copia in server/data/adapter.json e adatta agli endpoint del tuo dispositivo. {{value}} viene sostituito col valore del comando.",
+
+  "state": {
+    "url": "http://192.168.1.50/api/stato",
+    "method": "GET"
+  },
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "map": {
+    "on": "acceso",
+    "target": "setpoint",
+    "room": "temperatura",
+    "level": "potenza",
+    "alarm": "allarme"
+  },
+  "onValues": ["on", "true", 1, true, "acceso"],
+
+  "commands": {
+    "on": { "url": "http://192.168.1.50/api/accendi", "method": "POST" },
+    "off": { "url": "http://192.168.1.50/api/spegni", "method": "POST" },
+    "target": {
+      "url": "http://192.168.1.50/api/setpoint",
+      "method": "POST",
+      "body": "{\"valore\": {{value}}}"
+    },
+    "level": {
+      "url": "http://192.168.1.50/api/potenza",
+      "method": "POST",
+      "body": "{\"valore\": {{value}}}"
+    }
+  }
+}
