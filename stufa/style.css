@@ -176,6 +176,20 @@ main { display: grid; gap: 14px; }
 
 .room-label { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
 
+.meta-row { display: flex; gap: 20px; margin: 12px 0 0; }
+
+.meta { display: flex; flex-direction: column; gap: 2px; }
+
+.meta em {
+  font-style: normal;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.meta b { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
 .target-row {
   display: flex;
   align-items: center;

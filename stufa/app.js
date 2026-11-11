@@ -56,7 +56,14 @@ let schedule = load(KEYS.sched, defaultSchedule());
 let history = load(KEYS.hist, []);
 let events = load(KEYS.events, []);
 
-const stove = { on: false, target: 21, level: 2, room: null, alarm: null, reachable: true, stale: false };
+const stove = {
+  on: false, target: 21, level: 2, room: null, alarm: null,
+  reachable: true, stale: false, mode: null, stage: null, stageName: null,
+};
+
+const STAGE_LABELS = {
+  // Solo codici osservati: il codice della scheda non è documentato.
+};
 
 let mode = 'none'; // 'bridge' | 'local' | 'none'
 let stream = null;
@@ -192,6 +199,9 @@ function applySnapshot(data) {
   stove.alarm = s.alarm || null;
   stove.reachable = s.reachable !== false;
   stove.stale = !!s.stale;
+  stove.mode = s.mode || null;
+  stove.stage = typeof s.stage === 'number' ? s.stage : null;
+  stove.stageName = s.stageName || STAGE_LABELS[s.stage] || null;
 
   if (Array.isArray(data.events)) {
     events = data.events.slice(-40);
@@ -299,6 +309,9 @@ function goLocal(label) {
   if (local.room == null) local.room = typeof stove.room === 'number' ? stove.room : 19.4;
   stove.reachable = true;
   stove.stale = false;
+  stove.mode = 'manual';
+  stove.stage = null;
+  stove.stageName = null;
   setConn(label, 'warn');
   $('schedState').textContent = 'solo questo dispositivo';
   $('connInfo').textContent = 'Nessun bridge collegato: comandi e programma restano su questo dispositivo.';
@@ -350,6 +363,14 @@ function render() {
 
   $('roomTemp').textContent = typeof stove.room === 'number' ? stove.room.toFixed(1) : '--';
   $('targetTemp').textContent = stove.target.toFixed(stove.target % 1 === 0 ? 0 : 1);
+
+  const stageText = stove.stage == null
+    ? '—'
+    : (stove.stageName || 'Fase ' + stove.stage);
+  $('stageLabel').textContent = stageText;
+  $('modeLabel').textContent = stove.on
+    ? (stove.mode === 'auto' ? 'Automatica' : 'Manuale')
+    : '—';
 
   const btn = $('powerBtn');
   btn.textContent = stove.on ? 'Spegni' : 'Accendi';

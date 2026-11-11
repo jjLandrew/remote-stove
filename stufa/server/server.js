@@ -214,11 +214,19 @@ function httpAdapter(config) {
 //   [0] MAC di chi scrive   [1] ora HH:MM esadecimale   [2] giorno 0-6 (0 = lunedì)
 //   [3] potenza 1-5         [4] set point esadecimale    [5] temperatura ambiente
 //   [6] fase della scheda   [7] modo (0 manuale, 1 automatico)   [8] 1 accesa / 0 spenta
-//   [9] fase fumi           [10] modello scheda          [11] crono settimanale
+//   [9] campo non decodificato (oggi "00")   [10] carattere di stato (oggi "O")
+//   [11] crono settimanale
 //   [12] parametri della scheda
 // Le posizioni vengono dal codice dell'app (MainActivity, metodo che scarica
 // realtime.txt): substring(19,20) giorno, (21,22) potenza, (23,25) set point,
 // (26,28) temperatura, (29,31) fase, (32,33) modo, (34,35) acceso/spento.
+// Nomi delle fasi: la scheda manda un codice numerico e l'APK non contiene le
+// etichette (le risorse del layout sono state rimosse). Qui vanno SOLO i codici
+// verificati guardando la stufa, altrimenti meglio il numero nudo.
+const BRAHMA_STAGES = {
+  // 5: 'cooling',
+};
+
 function brahmaParseRealtime(text) {
   const line = String(text).split(/\r?\n/)[0];
   const f = line.split(';');
@@ -234,6 +242,7 @@ function brahmaParseRealtime(text) {
     room: Number.isFinite(room) && room > -20 && room < 60 ? room : null,
     mode: dec(f[7]) === 1 ? 'auto' : 'manual',
     stage: hex(f[6]),
+    stageName: BRAHMA_STAGES[hex(f[6])] || null,
     status: on ? 'accesa' : 'spenta',
     // I codici delle fasi di lavoro e degli allarmi non sono documentati:
     // meglio nessun allarme che un allarme inventato.

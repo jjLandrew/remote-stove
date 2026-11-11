@@ -145,9 +145,14 @@ e `info.txt` (contiene la password della stufa: non va mai copiato nel repositor
 
 Punti ancora aperti, da verificare guardando la stufa e l'app del produttore:
 
-- se il campo "temperatura" di `realtime.txt` è l'ambiente o i fumi;
-- i codici delle fasi (accensione, regime, *cooling*) e degli allarmi: l'adattatore non li inventa,
-  `alarm` resta `null` e lo stato riporta solo accesa/spenta.
+- i **nomi** dei codici di fase: la scheda manda solo un numero (osservati `5`, `8`, `9`) e l'APK
+  non contiene le etichette, quindi l'app mostra "Fase 5" finché non li mappiamo guardando la
+  stufa. La tabella `BRAHMA_STAGES` in `server.js` è predisposta;
+- il **campo degli allarmi**: `alarm` resta `null` — meglio nessun allarme che uno inventato.
+  I candidati sono i due campi non decodificati dopo "acceso" (oggi `00` e `O`).
+
+Il campo temperatura di `realtime.txt` è la **temperatura ambiente** (confermato a confronto con
+l'app del produttore).
 
 ## Installazione su iPhone
 
@@ -171,8 +176,23 @@ Due modi che funzionano davvero, senza aprire porte sul router.
    Il comando stampa l'indirizzo da usare, del tipo
    `https://<nome-macchina>.<vostra-tailnet>.ts.net`.
 
-> Su `jjpc` questo passo è **già fatto**: `https://jjpc.tail064656.ts.net` inoltra a
-> `http://127.0.0.1:8787`, quindi dall'iPhone basta aprire quell'indirizzo (Tailscale acceso).
+> **Come è configurato su `jjpc`.** Tailscale serve è già usato da altri servizi, quindi ognuno
+> ha la sua porta HTTPS sullo stesso nome macchina:
+>
+> | Porta | Backend | A cosa serve |
+> | --- | --- | --- |
+> | 443 | `http://127.0.0.1:8080` | KeePassium (`keepass-webdav.service`, rclone WebDAV) |
+> | 8443 | `http://127.0.0.1:8787` | questa app |
+>
+> Quindi l'indirizzo da mettere su iPhone è **`https://jjpc.tail064656.ts.net:8443`**
+> (il database delle password resta sul 443, intatto). I comandi, da eseguire **una volta come root**:
+>
+> ```bash
+> sudo tailscale set --operator=$USER                     # poi serve non richiede più sudo
+> tailscale serve --bg --https=443 http://127.0.0.1:8080  # KeePassium
+> tailscale serve --bg --https=8443 http://127.0.0.1:8787 # questa app
+> tailscale serve status
+> ```
 4. Sull'iPhone installa **Tailscale** dall'App Store e accedi con lo stesso account.
 5. Apri quell'indirizzo **in Safari** (Chrome su iOS non installa le PWA).
 6. Tocca **Condividi** → **Aggiungi alla schermata Home** → **Aggiungi**.
@@ -373,6 +393,10 @@ Tutte le rotte `/api/*` richiedono `Authorization: Bearer <token>` (o `?token=` 
 | PUT | `/api/schedule` | `{"enabled":true,"days":{…}}` |
 | GET | `/api/events` | log completo (ultimi 300) |
 
+Campi di `state`: `on`, `target`, `level`, `room` (ambiente), `mode` (`manual`/`auto`), `stage`
+(codice numerico della fase della scheda), `stageName` (nome della fase, `null` finché il codice non
+è mappato), `alarm` (allarme testuale, oggi sempre `null`), `reachable`, `stale`.
+
 ## Reti 2,4 GHz e 5 GHz
 
 L'app e il bridge **funzionano su qualsiasi banda**: sono solo HTTP, quindi il telefono può stare
@@ -403,8 +427,8 @@ entrambi dal cloud del produttore, quindi il bridge può stare ovunque abbia int
 Verificato con il simulatore: autenticazione, comandi, programma eseguito dal bridge, persistenza,
 adattatore HTTP, PWA servita dal bridge.Verificato su una stufa reale (Brahma PG315C / BTouch): lettura dello stato via cloud FTP,
 accensione e spegnimento, scrittura di `config.txt` senza alterare crono e parametri.
-Non ancora verificato: se il campo "temperatura" è l'ambiente o i fumi, e i codici di
-fase/allarme (vedi sopra).
+Temperatura ambiente confermata. Restano da mappare i nomi dei codici di fase e il campo degli
+allarmi (vedi sopra).
 
 ## File
 
