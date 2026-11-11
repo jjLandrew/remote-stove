@@ -44,9 +44,24 @@
       <p class="room"><span id="roomTemp">--</span><span class="unit">°C</span></p>
       <p class="room-label">Temperatura ambiente</p>
 
+      <div class="gauge" aria-hidden="true">
+        <div class="gauge-track">
+          <span class="gauge-fill" id="gaugeFill"></span>
+          <span class="gauge-mark" id="gaugeMark"></span>
+        </div>
+      </div>
+
       <div class="meta-row">
         <span class="meta"><em>Fase</em><b id="stageLabel">—</b></span>
-        <span class="meta"><em>Modalità</em><b id="modeLabel">—</b></span>
+        <span class="meta"><em>Aggiornato</em><b id="updatedLabel">—</b></span>
+      </div>
+
+      <div class="mode-block">
+        <span class="mode-label">Modalità</span>
+        <div class="segmented small" id="modeSeg" role="group" aria-label="Modalità di lavoro">
+          <button type="button" data-mode="manual">Manuale</button>
+          <button type="button" data-mode="auto">Auto</button>
+        </div>
       </div>
 
       <div class="target-row">

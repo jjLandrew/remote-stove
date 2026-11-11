@@ -59,6 +59,7 @@ let events = load(KEYS.events, []);
 const stove = {
   on: false, target: 21, level: 2, room: null, alarm: null,
   reachable: true, stale: false, mode: null, stage: null, stageName: null,
+  updatedAt: null,
 };
 
 const STAGE_LABELS = {
@@ -68,7 +69,7 @@ const STAGE_LABELS = {
 let mode = 'none'; // 'bridge' | 'local' | 'none'
 let stream = null;
 let selectedDay = JS_TO_KEY[new Date().getDay()];
-let local = { room: 19.4, on: false, target: 21, level: 2 };
+let local = { room: 19.4, on: false, target: 21, level: 2, mode: 'manual' };
 let lastSchedulePush = 0;
 let scheduleTimer = null;
 let lastSample = 0;
@@ -205,6 +206,7 @@ function applySnapshot(data) {
   stove.mode = s.mode || null;
   stove.stage = typeof s.stage === 'number' ? s.stage : null;
   stove.stageName = s.stageName || STAGE_LABELS[s.stage] || null;
+  stove.updatedAt = s.updatedAt || null;
 
   if (Array.isArray(data.events)) {
     events = data.events.slice(-40);
@@ -269,6 +271,15 @@ function setLevel(value) {
   command('level', next);
 }
 
+function setMode(next) {
+  const value = next === 'auto' ? 'auto' : 'manual';
+  if (value === stove.mode) return;
+  stove.mode = value;
+  render();
+  command('mode', value);
+  toast(value === 'auto' ? 'Modalità automatica' : 'Modalità manuale');
+}
+
 function localCommand(action, value) {
   if (action === 'on') {
     local.on = true;
@@ -282,10 +293,14 @@ function localCommand(action, value) {
   } else if (action === 'level') {
     local.level = value;
     addLocalEvent('comando', 'Potenza ' + value);
+  } else if (action === 'mode') {
+    local.mode = value === 'auto' ? 'auto' : 'manual';
+    addLocalEvent('comando', 'Modalità ' + local.mode);
   }
   stove.on = local.on;
   stove.target = local.target;
   stove.level = local.level;
+  stove.mode = local.mode;
   render();
 }
 
@@ -371,9 +386,19 @@ function render() {
     ? '—'
     : (stove.stageName || 'Fase ' + stove.stage);
   $('stageLabel').textContent = stageText;
-  $('modeLabel').textContent = stove.on
-    ? (stove.mode === 'auto' ? 'Automatica' : 'Manuale')
-    : '—';
+  $('updatedLabel').textContent = stove.updatedAt ? timeLabel(stove.updatedAt) : '—';
+
+  [...$('modeSeg').children].forEach((b) => {
+    b.classList.toggle('active', b.dataset.mode === stove.mode);
+  });
+
+  const hero = document.querySelector('.hero');
+  if (hero) hero.classList.toggle('on', stove.on);
+
+  // ambiente e set point sulla stessa scala 7–30 °C
+  const pct = (v) => clamp(((Number(v) - 7) / 23) * 100, 0, 100);
+  $('gaugeFill').style.width = (typeof stove.room === 'number' ? pct(stove.room) : 0) + '%';
+  $('gaugeMark').style.left = 'calc(' + pct(stove.target) + '% - 1px)';
 
   const btn = $('powerBtn');
   btn.textContent = stove.on ? 'Spegni' : 'Accendi';
@@ -673,6 +698,11 @@ function bind() {
   $('powerBtn').addEventListener('click', () => setOn(!stove.on));
   $('plusBtn').addEventListener('click', () => setTarget(stove.target + 0.5));
   $('minusBtn').addEventListener('click', () => setTarget(stove.target - 0.5));
+
+  $('modeSeg').addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-mode]');
+    if (btn) setMode(btn.dataset.mode);
+  });
 
   $('autoToggle').addEventListener('change', (e) => {
     schedule.enabled = e.target.checked;

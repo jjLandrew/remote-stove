@@ -126,6 +126,10 @@ settimanale e parametri della scheda restano quelli della stufa.
   vengono arrotondati.
 - Accensione/spegnimento = il campo "acceso" (`1`/`0`), lo stesso che l'app scrive dallo Switch
   "Stato" della schermata *Altro*.
+- Modalità manuale/automatica = campo "modo" (`0`/`1`) di `config.txt`, comandabile da remoto con
+  `POST /api/command` e `{"action": "mode", "value": "auto"}`. **Non ancora verificato sul campo**:
+  dopo la scrittura lo stato letto deve passare a `"mode": "auto"` in `realtime.txt`. In automatico
+  comanda il crono della scheda, quindi il programma settimanale dell'app non serve.
 - Quando la stufa prende il file, ne salva una copia in `confbk.txt`: è la conferma che il
   comando è arrivato (osservato ~1 minuto dopo la scrittura).
 

@@ -200,6 +200,10 @@ function httpAdapter(config) {
     async setLevel(value) {
       await request(config.commands.level, value);
     },
+    async setMode(value) {
+      if (!config.commands.mode) throw new Error('adattatore http: commands.mode non configurato');
+      await request(config.commands.mode, value);
+    },
   };
 }
 
@@ -466,6 +470,10 @@ function brahmaAdapter(config) {
       if (!(level >= 1 && level <= 5)) throw new Error('potenza fuori intervallo (1–5)');
       await patchConfig({ level });
     },
+    // campo "modo" di config.txt: 0 manuale, 1 automatico (rgMode della scheda)
+    async setMode(value) {
+      await patchConfig({ mode: String(value) === 'auto' ? 1 : 0 });
+    },
   };
 }
 
@@ -474,6 +482,7 @@ function simulatorAdapter() {
     on: state.on,
     target: state.target,
     level: state.level,
+    mode: state.mode || 'manual',
     room: typeof state.room === 'number' ? state.room : 19.4,
   };
   let last = Date.now();
@@ -497,6 +506,7 @@ function simulatorAdapter() {
         on: sim.on,
         target: sim.target,
         level: sim.level,
+        mode: sim.mode,
         room: Math.round(sim.room * 10) / 10,
         alarm: null,
         reachable: true,
@@ -511,6 +521,9 @@ function simulatorAdapter() {
     },
     async setLevel(value) {
       sim.level = value;
+    },
+    async setMode(value) {
+      sim.mode = String(value) === 'auto' ? 'auto' : 'manual';
     },
   };
 }
@@ -595,6 +608,13 @@ function command(action, value, source) {
         if (Number.isNaN(l)) throw new Error('potenza non valida');
         await adapter.setLevel(l);
         state.level = l;
+      } else if (action === 'mode') {
+        const m = String(value) === 'auto' ? 'auto' : 'manual';
+        if (typeof adapter.setMode !== 'function') {
+          throw new Error('l\'adattatore non sa cambiare la modalità');
+        }
+        await adapter.setMode(m);
+        state.mode = m;
       } else {
         throw new Error('azione sconosciuta: ' + action);
       }
@@ -606,6 +626,7 @@ function command(action, value, source) {
           on: 'Accensione', off: 'Spegnimento',
           target: 'Set point ' + state.target + ' °C',
           level: 'Potenza ' + state.level,
+          mode: 'Modalità ' + (state.mode === 'auto' ? 'automatica' : 'manuale'),
         }[action];
         log('comando', label + (source ? ' (' + source + ')' : ''));
       }
@@ -797,7 +818,7 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === '/api/command' && req.method === 'POST') {
       const body = await readBody(req);
-      if (!['on', 'off', 'target', 'level'].includes(body.action)) {
+      if (!['on', 'off', 'target', 'level', 'mode'].includes(body.action)) {
         sendJson(res, 400, { error: 'azione non valida' });
         return;
       }
