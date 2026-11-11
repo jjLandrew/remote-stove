@@ -1,7 +1,7 @@
 {
   "name": "Stufa",
   "short_name": "Stufa",
-  "description": "Controllo e programmazione di una stufa a pellet via Home Assistant.",
+  "description": "Controllo e programmazione di una stufa a pellet.",
   "lang": "it",
   "start_url": "./",
   "scope": "./",

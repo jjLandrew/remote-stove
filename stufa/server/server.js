@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const os = require('os');
+const net = require('net');
 
 const ROOT = path.join(__dirname, '..');
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
@@ -202,6 +203,263 @@ function httpAdapter(config) {
   };
 }
 
+/* ------------------------------------------------------------------ */
+/* Adattatore Brahma (cloud FTP, app Magic Stove)                       */
+/* ------------------------------------------------------------------ */
+
+// Il cloud Brahma non ha una API: l'app scrive e legge file su un FTP, in una
+// cartella per dispositivo. Questo adattatore fa lo stesso senza l'app.
+
+// realtime.txt: 235 byte, lo scrive la stufa. Campi separati da ';':
+//   [0] MAC di chi scrive   [1] ora HH:MM esadecimale   [2] giorno 0-6 (0 = lunedì)
+//   [3] potenza 1-5         [4] set point esadecimale    [5] temperatura ambiente
+//   [6] fase della scheda   [7] modo (0 manuale, 1 automatico)   [8] 1 accesa / 0 spenta
+//   [9] fase fumi           [10] modello scheda          [11] crono settimanale
+//   [12] parametri della scheda
+// Le posizioni vengono dal codice dell'app (MainActivity, metodo che scarica
+// realtime.txt): substring(19,20) giorno, (21,22) potenza, (23,25) set point,
+// (26,28) temperatura, (29,31) fase, (32,33) modo, (34,35) acceso/spento.
+function brahmaParseRealtime(text) {
+  const line = String(text).split(/\r?\n/)[0];
+  const f = line.split(';');
+  if (f.length < 11) throw new Error('realtime.txt non riconosciuto');
+  const hex = (v) => parseInt(String(v || '').trim(), 16);
+  const dec = (v) => parseInt(String(v || '').trim(), 10);
+  const room = hex(f[5]);
+  const on = dec(f[8]) === 1;
+  return {
+    on,
+    target: hex(f[4]),
+    level: dec(f[3]),
+    room: Number.isFinite(room) && room > -20 && room < 60 ? room : null,
+    mode: dec(f[7]) === 1 ? 'auto' : 'manual',
+    stage: hex(f[6]),
+    status: on ? 'accesa' : 'spenta',
+    // I codici delle fasi di lavoro e degli allarmi non sono documentati:
+    // meglio nessun allarme che un allarme inventato.
+    alarm: null,
+  };
+}
+
+function ftpConnect(cfg) {
+  const timeout = Number(cfg.timeoutMs) || 15000;
+  const sock = net.createConnection({ host: cfg.host, port: Number(cfg.port) || 21 });
+  let buffer = '';
+  const replies = [];
+  let waiter = null;
+  let failure = null;
+
+  function fail(err) {
+    failure = failure || err;
+    if (waiter) {
+      const current = waiter;
+      waiter = null;
+      current.reject(failure);
+    }
+  }
+
+  sock.setEncoding('latin1');
+  sock.setTimeout(timeout, () => sock.destroy(new Error('timeout FTP')));
+  sock.on('data', (chunk) => {
+    buffer += chunk;
+    let index;
+    while ((index = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, index).replace(/\r$/, '');
+      buffer = buffer.slice(index + 1);
+      if (!/^\d{3} /.test(line)) continue;
+      const reply = { code: Number(line.slice(0, 3)), text: line.slice(4) };
+      if (waiter) {
+        const current = waiter;
+        waiter = null;
+        current.resolve(reply);
+      } else {
+        replies.push(reply);
+      }
+    }
+  });
+  sock.on('error', fail);
+  sock.on('close', () => fail(new Error('connessione FTP chiusa')));
+
+  function next() {
+    if (replies.length) return Promise.resolve(replies.shift());
+    if (failure) return Promise.reject(failure);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        waiter = null;
+        reject(new Error('timeout FTP'));
+      }, timeout);
+      waiter = {
+        resolve: (reply) => {
+          clearTimeout(timer);
+          resolve(reply);
+        },
+        reject: (err) => {
+          clearTimeout(timer);
+          reject(err);
+        },
+      };
+    });
+  }
+
+  function cmd(line, ok) {
+    sock.write(line + '\r\n');
+    return next().then((reply) => {
+      if (ok && !ok.includes(reply.code)) {
+        throw new Error('FTP ' + line.split(' ')[0] + ': ' + reply.code + ' ' + reply.text);
+      }
+      return reply;
+    });
+  }
+
+  async function pasv() {
+    const reply = await cmd('PASV', [227]);
+    const found = /(\d+),(\d+),(\d+),(\d+),(\d+),(\d+)/.exec(reply.text);
+    if (!found) throw new Error('risposta PASV non riconosciuta: ' + reply.text);
+    return Number(found[5]) * 256 + Number(found[6]);
+  }
+
+  async function transfer(verb, name, body) {
+    const port = await pasv();
+    const data = net.createConnection({ host: cfg.host, port });
+    data.setEncoding('latin1');
+    data.setTimeout(timeout, () => data.destroy(new Error('timeout trasferimento FTP')));
+    const chunks = [];
+    const ended = new Promise((resolve, reject) => {
+      data.on('data', (chunk) => chunks.push(chunk));
+      data.on('end', resolve);
+      data.on('error', reject);
+    });
+    sock.write(verb + ' ' + name + '\r\n');
+    const opening = await next();
+    if (opening.code !== 150 && opening.code !== 125) {
+      data.destroy();
+      throw new Error(verb + ' ' + name + ': ' + opening.code + ' ' + opening.text);
+    }
+    if (verb === 'STOR') data.end(body, 'latin1');
+    else data.end();
+    await ended;
+    const closing = await next();
+    if (closing.code !== 226 && closing.code !== 250) {
+      throw new Error(verb + ' ' + name + ': ' + closing.code + ' ' + closing.text);
+    }
+    return chunks.join('');
+  }
+
+  async function open() {
+    const greeting = await next();
+    if (greeting.code !== 220) throw new Error('FTP: ' + greeting.code + ' ' + greeting.text);
+    const user = await cmd('USER ' + cfg.user, [230, 331]);
+    if (user.code === 331) await cmd('PASS ' + cfg.pass, [230, 202]);
+    await cmd('TYPE I', [200]);
+    return {
+      cwd: (dir) => cmd('CWD ' + dir, [250, 200]),
+      retr: (name) => transfer('RETR', name),
+      stor: (name, body) => transfer('STOR', name, body),
+      quit() {
+        try {
+          sock.write('QUIT\r\n');
+        } catch {
+          /* già chiusa */
+        }
+        sock.destroy();
+      },
+    };
+  }
+
+  return { open };
+}
+
+function brahmaAdapter(config) {
+  const cfg = config || {};
+  const mac = String(cfg.mac || '').toLowerCase().replace(/[^0-9a-f]/g, '');
+  if (!cfg.host || !cfg.user || !cfg.pass || mac.length !== 12) {
+    throw new Error('brahma.json incompleto: servono host, user, pass e mac (12 cifre esadecimali)');
+  }
+  const base = (cfg.dir || '/WebServer/BTouchPellet/0001/').replace(/\/+$/, '') + '/' + mac + '/';
+  const link = { host: cfg.host, port: cfg.port, user: cfg.user, pass: cfg.pass, timeoutMs: cfg.timeoutMs };
+
+  async function withSession(work) {
+    const session = await ftpConnect(link).open();
+    try {
+      await session.cwd(base);
+      return await work(session);
+    } finally {
+      session.quit();
+    }
+  }
+
+  // config.txt: 224 byte, campi a posizione fissa (stesse posizioni di realtime.txt).
+  // MAC;HH:MM;giorno;potenza;setpoint(hex);modo;acceso;crono(42);parametri;scheda
+  // ';' fissi a 12, 18, 20, 22, 25, 27, 29, 72, 223: se non tornano non si scrive.
+  function buildConfig(line, patch) {
+    const f = line.split(';');
+    if (line.length !== 224 || f.length !== 10) {
+      throw new Error('config.txt inatteso: ' + line.length + ' byte invece di 224');
+    }
+    const hex2 = (n) => String(Math.round(n).toString(16)).toUpperCase().padStart(2, '0');
+    const now = new Date();
+    f[1] = hex2(now.getHours()) + ':' + hex2(now.getMinutes());
+    f[2] = String(now.getDay() === 0 ? 6 : now.getDay() - 1);
+    if (patch.level != null) f[3] = String(patch.level);
+    if (patch.target != null) f[4] = hex2(patch.target);
+    if (patch.mode != null) f[5] = String(patch.mode);
+    // accensione/spegnimento: l'app scrive 1 o 0 in questo campo (Switch "Stato")
+    if (patch.power != null) f[6] = patch.power ? '1' : '0';
+    const next = f.join(';');
+    // stessi separatori che l'app si aspetta: se non tornano, non si scrive nulla
+    const marks = [12, 18, 20, 22, 25, 27, 29, 72, 223];
+    if (next.length !== 224 || marks.some((i) => next.charAt(i) !== ';')) {
+      throw new Error('config.txt ricostruito non valido: scrittura annullata');
+    }
+    return next;
+  }
+
+  // Rilegge config.txt, cambia solo i campi richiesti e lo ricarica: crono e
+  // parametri della scheda restano quelli della stufa.
+  async function patchConfig(patch) {
+    return withSession(async (session) => {
+      const raw = await session.retr('config.txt');
+      const line = String(raw).split(/\r?\n/)[0];
+      await session.stor('config.txt', buildConfig(line, patch));
+    });
+  }
+
+  return {
+    name: 'brahma',
+    describe() {
+      return 'Brahma cloud FTP · ' + cfg.host + ' · ' + mac;
+    },
+    async probe() {
+      const started = Date.now();
+      try {
+        await withSession((session) => session.retr('realtime.txt'));
+        return { ok: true, latencyMs: Date.now() - started };
+      } catch (err) {
+        return { ok: false, error: err.message || 'non raggiungibile', latencyMs: Date.now() - started };
+      }
+    },
+    async getState() {
+      const raw = await withSession((session) => session.retr('realtime.txt'));
+      return { ...brahmaParseRealtime(raw), reachable: true, stale: false };
+    },
+    async setPower(on) {
+      await patchConfig({ power: !!on });
+    },
+    async setTarget(value) {
+      const target = Math.round(Number(value));
+      if (!Number.isFinite(target) || target < 5 || target > 35) {
+        throw new Error('set point fuori intervallo (5–35 °C)');
+      }
+      await patchConfig({ target });
+    },
+    async setLevel(value) {
+      const level = Math.round(Number(value));
+      if (!(level >= 1 && level <= 5)) throw new Error('potenza fuori intervallo (1–5)');
+      await patchConfig({ level });
+    },
+  };
+}
+
 function simulatorAdapter() {
   const sim = {
     on: state.on,
@@ -251,6 +509,8 @@ function simulatorAdapter() {
 let adapter;
 if (ADAPTER_NAME === 'http') {
   adapter = httpAdapter(readJson('adapter.json', {}));
+} else if (ADAPTER_NAME === 'brahma') {
+  adapter = brahmaAdapter(readJson('brahma.json', {}));
 } else {
   adapter = simulatorAdapter();
 }

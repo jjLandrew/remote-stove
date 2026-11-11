@@ -1,0 +1,14 @@
+{
+  "_commento": "Copia in server/data/brahma.json (escluso da git) e riempi user, pass e mac. Il MAC e' quello della stufa senza separatori, in minuscolo: e' anche il nome della cartella sul cloud.",
+
+  "host": "ftp16.cloud.brahma.it",
+  "port": 21,
+  "user": "UTENTE_FTP",
+  "pass": "PASSWORD_FTP",
+  "mac": "000000000000",
+  "dir": "/WebServer/BTouchPellet/0001/",
+  "timeoutMs": 15000,
+
+  "_commento_power": "Accensione/spegnimento: il campo 'modo' di config.txt va verificato sulla stufa prima di usarlo. Finche' queste due chiavi mancano, il bridge rifiuta il comando invece di indovinare.",
+  "power": {}
+}
