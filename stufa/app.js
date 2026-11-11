@@ -155,7 +155,10 @@ async function connect() {
     if (err.status === 401 || err.status === 403) {
       mode = 'none';
       setConn('Serve il token', 'warn');
-      $('connInfo').textContent = 'Token mancante o errato: apri le impostazioni e incollalo.';
+      const len = String(cfg.token || '').length;
+      $('connInfo').textContent = len
+        ? 'Token rifiutato (ricevuti ' + len + ' caratteri): ricontrolla di averlo copiato tutto da server/data/token.txt.'
+        : 'Token mancante: incollalo qui sotto.';
       openSheet('settingsSheet');
       render();
       return;
@@ -714,7 +717,26 @@ function bind() {
   });
 }
 
+// Token passato nell'URL (?token=...): utile per aprire l'app da un link senza
+// digitare 47 caratteri sul telefono. Viene salvato e poi tolto dall'indirizzo.
+function tokenFromUrl() {
+  let params;
+  try {
+    params = new URLSearchParams(location.search);
+  } catch {
+    return;
+  }
+  const token = (params.get('token') || '').trim();
+  if (!token) return;
+  cfg = Object.assign({}, cfg, { token, demo: false });
+  save(KEYS.cfg, cfg);
+  try {
+    history.replaceState({}, '', location.pathname + location.hash);
+  } catch { /* storico non disponibile */ }
+}
+
 function start() {
+  tokenFromUrl();
   renderPowerSeg();
   renderDays();
   renderSlots();

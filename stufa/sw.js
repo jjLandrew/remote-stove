@@ -1,4 +1,4 @@
-const CACHE = 'stufa-v3';
+const CACHE = 'stufa-v4';
 const ASSETS = [
   './',
   './index.html',
