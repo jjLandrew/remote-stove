@@ -170,12 +170,15 @@ Due modi che funzionano davvero, senza aprire porte sul router.
    ```
    Il comando stampa l'indirizzo da usare, del tipo
    `https://<nome-macchina>.<vostra-tailnet>.ts.net`.
+
+> Su `jjpc` questo passo è **già fatto**: `https://jjpc.tail064656.ts.net` inoltra a
+> `http://127.0.0.1:8787`, quindi dall'iPhone basta aprire quell'indirizzo (Tailscale acceso).
 4. Sull'iPhone installa **Tailscale** dall'App Store e accedi con lo stesso account.
 5. Apri quell'indirizzo **in Safari** (Chrome su iOS non installa le PWA).
 6. Tocca **Condividi** → **Aggiungi alla schermata Home** → **Aggiungi**.
 7. Apri l'icona "Stufa": parte a schermo intero, senza barra di Safari.
    Ingranaggio → indirizzo (`https://<nome-macchina>.<tailnet>.ts.net`, senza `/` finale) e token
-   letto sul server con `cat /opt/stufa/stufa/server/data/token.txt` → **Collega**.
+   letto sul server con `cat ~/stufa/stufa/server/data/token.txt` → **Collega**.
    In alto deve comparire `Collegato · brahma`.
 
 ### B. Dominio + reverse proxy (Caddy)
@@ -201,22 +204,84 @@ Poi gli stessi passi 5–7 qui sopra con `https://stufa.example.com`.
 
 ## Il bridge sul server Ubuntu (cosa gira, dove)
 
-Un solo processo Node, nessun database, nessun servizio esterno.
+È installato su **`jjpc`** (Ubuntu 24.04, utente `ubuntu`, IP LAN `192.168.1.108`, IP Tailscale
+`100.120.33.75`). Un solo processo Node: niente database, niente `npm install`, niente servizi
+esterni. Non serve root: Node, codice e dati stanno nella home di `ubuntu`.
 
 | Percorso | Contenuto |
 | --- | --- |
-| `/opt/stufa` | clone del repository (`git pull` per aggiornare) |
-| `/opt/stufa/stufa/server/server.js` | il bridge: HTTP + SSE, scheduler, store, adattatori |
-| `/opt/stufa/stufa/index.html`, `app.js`, `style.css`, `sw.js`, `manifest.webmanifest`, `icons/` | la PWA, servita dallo stesso processo |
-| `/opt/stufa/stufa/server/data/brahma.json` | credenziali FTP + MAC della stufa (600, fuori da git) |
-| `/opt/stufa/stufa/server/data/token.txt` | token di accesso, generato al primo avvio (600) |
-| `/opt/stufa/stufa/server/data/state.json`, `schedule.json`, `events.json`, `history.json` | dati persistenti (fuori da git) |
+| `/home/ubuntu/stufa` | clone del repository (`git pull` per aggiornare) |
+| `/home/ubuntu/stufa/stufa/server/server.js` | il bridge: HTTP + SSE, scheduler, store, adattatori |
+| `/home/ubuntu/stufa/stufa/index.html`, `app.js`, `style.css`, `sw.js`, `manifest.webmanifest`, `icons/` | la PWA, servita dallo stesso processo |
+| `/home/ubuntu/.local/node` | Node 22 LTS scompattato a mano (nessun pacchetto di sistema) |
+| `/home/ubuntu/.local/bin/node`, `npm` | symlink nel `PATH` del crontab |
+| `/home/ubuntu/stufa/stufa/server/data/brahma.json` | credenziali FTP + MAC della stufa (600, fuori da git) |
+| `/home/ubuntu/stufa/stufa/server/data/token.txt` | token di accesso, generato al primo avvio (600) |
+| `/home/ubuntu/stufa/stufa/server/data/state.json`, `schedule.json`, `events.json`, `history.json` | dati persistenti (fuori da git) |
+| `/home/ubuntu/stufa-bridge.log` | stdout/stderr del bridge (si azzera a ogni riavvio) |
+| crontab di `ubuntu` | riga `@reboot` che riavvia il bridge all'accensione |
+| `tailscale serve` | espone `127.0.0.1:8787` come `https://jjpc.tail064656.ts.net` |
 
 Cosa fa, in continuo: legge lo stato dalla stufa (`realtime.txt`), esegue il programma settimanale,
 registra gli eventi, tiene lo storico temperature e serve la PWA/le API su `0.0.0.0:8787`
 (IPv4 + IPv6). Consumo trascurabile: una connessione FTP ogni pochi secondi, nessuna CPU.
 
-### Installazione
+### Com'è stato installato su `jjpc` (comandi reali)
+
+```bash
+# Node 22 nella home, senza sudo (tarball ufficiale, checksum verificato)
+curl -fsSL https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt -o ~/SHASUMS256.txt
+F=$(grep "linux-x64.tar.xz$" ~/SHASUMS256.txt | head -1 | awk '{print $2}')
+curl -fsSLO "https://nodejs.org/dist/latest-v22.x/$F"
+grep " $F$" ~/SHASUMS256.txt | sha256sum -c -
+mkdir -p ~/.local/node ~/.local/bin
+tar -xJf "$F" -C ~/.local/node --strip-components=1
+ln -sf ~/.local/node/bin/node ~/.local/bin/node
+ln -sf ~/.local/node/bin/npm  ~/.local/bin/npm
+
+# codice e credenziali (brahma.json copiato dal PC, mai passato per git)
+git clone https://github.com/jjLandrew/remote-stove.git ~/stufa
+mkdir -p ~/stufa/stufa/server/data && chmod 700 ~/stufa/stufa/server/data
+# scp stufa/server/data/brahma.json server:~/stufa/stufa/server/data/
+chmod 600 ~/stufa/stufa/server/data/brahma.json
+
+# primo avvio
+cd ~/stufa/stufa
+PATH=$HOME/.local/bin:$PATH ADAPTER=brahma PORT=8787 \
+  setsid nohup node server/server.js > ~/stufa-bridge.log 2>&1 &
+```
+
+Avvio automatico al boot **senza root**, con `crontab -e`:
+
+```
+@reboot cd /home/ubuntu/stufa/stufa && PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin ADAPTER=brahma PORT=8787 setsid nohup node server/server.js > /home/ubuntu/stufa-bridge.log 2>&1
+```
+
+Perché cron e non systemd: l'utente `ubuntu` non ha `sudo` senza password, e installare Node in
+`~/.local` evita qualsiasi pacchetto di sistema. Se avete root, la variante con systemd è più sotto.
+
+### Verifica
+
+```bash
+tail -5 ~/stufa-bridge.log                       # righe di avvio con gli indirizzi
+pgrep -af server/server.js                       # deve stampare il processo
+TOKEN=$(cat ~/stufa/stufa/server/data/token.txt)
+curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8787/api/state
+curl -s -o /dev/null -w '%{http_code}\n' https://jjpc.tail064656.ts.net/    # 200 = PWA raggiungibile
+tailscale serve status                           # deve mostrare 443 -> 127.0.0.1:8787
+```
+
+Risposta reale di `/api/state`:
+
+```json
+{"state":{"on":true,"target":35,"level":1,"room":30,"alarm":null,"reachable":true,
+"stale":false,"mode":"manual","stage":8,"status":"accesa"},
+"adapter":{"name":"brahma","description":"Brahma cloud FTP · ftp16.cloud.brahma.it · f8f0056a687b"}}
+```
+
+### Installazione da zero (con `sudo`, in `/opt`)
+
+Se preferite la classica disposizione di sistema, gli stessi passi in `/opt/stufa`:
 
 ```bash
 sudo apt update && sudo apt install -y git curl
@@ -270,6 +335,20 @@ journalctl -u stufa-bridge -f            # log in diretta
 ```
 
 ### Manutenzione
+
+Su `jjpc` (cron, senza root):
+
+```bash
+cd ~/stufa && git pull                                   # aggiornare il codice
+pkill -f server/server.js                                # fermare
+cd ~/stufa/stufa && PATH=$HOME/.local/bin:$PATH ADAPTER=brahma PORT=8787 \
+  setsid nohup node server/server.js > ~/stufa-bridge.log 2>&1 &   # riavviare
+tail -20 ~/stufa-bridge.log                              # log
+cp -a ~/stufa/stufa/server/data ~/backup-stufa-$(date +%F)         # backup dati
+rm ~/stufa/stufa/server/data/token.txt                   # + riavvio = nuovo token
+```
+
+Con l'installazione in `/opt` e systemd:
 
 ```bash
 cd /opt/stufa && sudo git pull && sudo systemctl restart stufa-bridge   # aggiornare
