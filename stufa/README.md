@@ -145,9 +145,16 @@ e `info.txt` (contiene la password della stufa: non va mai copiato nel repositor
 
 Punti ancora aperti, da verificare guardando la stufa e l'app del produttore:
 
-- i **nomi** dei codici di fase: la scheda manda solo un numero (osservati `5`, `8`, `9`) e l'APK
-  non contiene le etichette, quindi l'app mostra "Fase 5" finché non li mappiamo guardando la
-  stufa. La tabella `BRAHMA_STAGES` in `server.js` è predisposta;
+- i **nomi** dei codici di fase: la scheda manda solo un numero e l'APK non contiene le etichette.
+  Verificati finora:
+
+  | Codice | Fase | Verifica |
+  | --- | --- | --- |
+  | 5 | cooling | letto mentre la stufa raffreddava dopo lo spegnimento |
+
+  Restano da osservare `8` e `9` (visti durante l'accensione) e i codici di flame on / warm up.
+  I nomi si aggiungono nella tabella `BRAHMA_STAGES` in `server.js`; finché un codice non è
+  mappato l'app mostra "Fase N".
 - il **campo degli allarmi**: `alarm` resta `null` — meglio nessun allarme che uno inventato.
   I candidati sono i due campi non decodificati dopo "acceso" (oggi `00` e `O`).
 

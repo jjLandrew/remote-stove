@@ -224,7 +224,7 @@ function httpAdapter(config) {
 // etichette (le risorse del layout sono state rimosse). Qui vanno SOLO i codici
 // verificati guardando la stufa, altrimenti meglio il numero nudo.
 const BRAHMA_STAGES = {
-  // 5: 'cooling',
+  5: 'cooling',
 };
 
 function brahmaParseRealtime(text) {
